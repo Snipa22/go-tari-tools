@@ -59,5 +59,3 @@ require (
 )
 
 replace github.com/Snipa22/go-tari-lib => ../go-tari-lib
-
-replace github.com/Snipa22/go-tari-grpc-lib/v3 => ../go-tari-grpc-lib
