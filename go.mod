@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/Snipa22/core-go-lib v1.2.0
 	github.com/Snipa22/go-tari-grpc-lib/v3 v3.2.0
-	github.com/Snipa22/go-tari-lib v0.0.0
+	github.com/Snipa22/go-tari-lib v1.0.0
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/gin-gonic/gin v1.10.1
 	github.com/jackc/pgx/v4 v4.18.3
@@ -57,5 +57,3 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/Snipa22/go-tari-lib => ../go-tari-lib
