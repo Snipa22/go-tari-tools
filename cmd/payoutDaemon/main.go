@@ -47,14 +47,20 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func atomicBalanceUpdates(milieu *core.Milieu, daemonResponse *tari_generated.TransferResponse, addressCache map[string]uint64, balanceCache map[string]uint64, batchID int) (successAmount uint64, failedAmount uint64, err error) {
-	for _, v := range daemonResponse.GetResults() {
+func atomicBalanceUpdates(milieu *core.Milieu, daemonResponse *tari_generated.TransferResponse, payments []*tari_generated.PaymentRecipient, addressCache map[string]uint64, balanceCache map[string]uint64, batchID int) (successAmount uint64, failedAmount uint64, err error) {
+	correlated, err := correlateTransferResults(payments, daemonResponse)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, cr := range correlated {
+		v := cr.Result
+		addr := cr.Payment.Address
 		// Each result needs to be handled cleanly
-		milieu.Debug(fmt.Sprintf("Processing transaction: %v for %v", v.TransactionId, addressCache[v.Address]))
+		milieu.Debug(fmt.Sprintf("Processing transaction: %v for %v", v.TransactionId, addressCache[addr]))
 		if v.IsSuccess {
-			successAmount += balanceCache[v.Address]
+			successAmount += balanceCache[addr]
 		} else {
-			failedAmount += balanceCache[v.Address]
+			failedAmount += balanceCache[addr]
 		}
 		txn, err := milieu.GetTransaction()
 		if err != nil {
@@ -69,7 +75,7 @@ func atomicBalanceUpdates(milieu *core.Milieu, daemonResponse *tari_generated.Tr
 		}
 		txn.Begin(context.Background())
 		defer milieu.CleanupTxn()
-		err = sql.CreateNewTransaction(txn, v.TransactionId, v.IsSuccess, v.FailureMessage, addressCache[v.Address], batchID, balanceCache[v.Address])
+		err = sql.CreateNewTransaction(txn, v.TransactionId, v.IsSuccess, v.FailureMessage, addressCache[addr], batchID, balanceCache[addr])
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
@@ -81,7 +87,7 @@ func atomicBalanceUpdates(milieu *core.Milieu, daemonResponse *tari_generated.Tr
 			milieu.CleanupTxn()
 			continue
 		}
-		err = sql.DecreaseBalance(txn, addressCache[v.Address], balanceCache[v.Address])
+		err = sql.DecreaseBalance(txn, addressCache[addr], balanceCache[addr])
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
@@ -91,7 +97,7 @@ func atomicBalanceUpdates(milieu *core.Milieu, daemonResponse *tari_generated.Tr
 		txn.Commit(context.Background())
 		milieu.CleanupTxn()
 		client := milieu.GetRedis()
-		client.Del(context.Background(), fmt.Sprintf("bal_bypass_%v", v.Address))
+		client.Del(context.Background(), fmt.Sprintf("bal_bypass_%v", addr))
 	}
 	return
 }
@@ -256,7 +262,7 @@ func performPayouts(milieu *core.Milieu) {
 			batchCount += 1
 			continue
 		}
-		localSuccess, localFailure, err := atomicBalanceUpdates(milieu, txResults, addressCache, balanceCache, batchID)
+		localSuccess, localFailure, err := atomicBalanceUpdates(milieu, txResults, group.Payments, addressCache, balanceCache, batchID)
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
