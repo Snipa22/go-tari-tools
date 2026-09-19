@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"github.com/Snipa22/go-tari-lib/walletGRPC"
+	"github.com/Snipa22/go-tari-lib/v2/walletGRPC"
 	"log"
 )
 

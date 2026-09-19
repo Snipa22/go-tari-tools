@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"github.com/Snipa22/core-go-lib/milieu"
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
-	"github.com/Snipa22/go-tari-lib/nodeGRPC"
+	"github.com/Snipa22/go-tari-lib/v2/nodeGRPC"
 	"math/rand"
 	"sync"
 )
