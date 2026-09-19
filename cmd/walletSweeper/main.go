@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
-	"github.com/Snipa22/go-tari-lib/v2/walletGRPC"
+	"github.com/Snipa22/go-tari-lib/v3/walletGRPC"
 	"log"
+	"time"
 )
 
 func main() {
@@ -15,12 +17,17 @@ func main() {
 	if *destAddressPtr == "" {
 		log.Fatal("Destination address is required")
 	}
-	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
-	addresses, err := walletGRPC.GetAddresses()
+	client, err := walletGRPC.New(*walletGRPCAddressPtr)
 	if err != nil {
 		log.Fatal(err)
 	}
-	balances, err := walletGRPC.GetBalances()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	addresses, err := client.GetAddresses(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	balances, err := client.GetBalances(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -31,7 +38,7 @@ func main() {
 		return
 	}
 	// fmt.Printf("Sending %v uT to %v\n", toSend, *destAddressPtr)
-	resp, err := walletGRPC.SendTransactions([]*tari_generated.PaymentRecipient{
+	resp, err := client.SendTransactions(ctx, []*tari_generated.PaymentRecipient{
 		{
 			Address:     *destAddressPtr,
 			Amount:      toSend,
