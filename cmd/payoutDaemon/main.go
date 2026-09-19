@@ -132,7 +132,6 @@ func performPayouts(milieu *core.Milieu) {
 
 	// With balances found, lets start the real processing
 	payments := make([]*tari_generated.PaymentRecipient, 0)
-	var totalAmount uint64 = 0
 	for _, sqlBalance := range balances {
 		milieu.Debug(fmt.Sprintf("Starting payout check for %v", sqlBalance.ID))
 		if !sqlBalance.Valid {
@@ -150,7 +149,6 @@ func performPayouts(milieu *core.Milieu) {
 			}
 		}
 		milieu.Debug(fmt.Sprintf("Adding %v to payment ready for %v", sqlBalance.ID, sqlBalance.Balance))
-		totalAmount += sqlBalance.Balance
 		paymentRecipient := &tari_generated.PaymentRecipient{
 			Address:       sqlBalance.Address,
 			Amount:        sqlBalance.Balance - 5000,
@@ -172,17 +170,60 @@ func performPayouts(milieu *core.Milieu) {
 		return
 	}
 
+	// Address pre-validation (format/cryptographic, NOT the DB `valid` flag above), tier
+	// classification, sort order, and greedy batch construction all happen in the pure
+	// splitPayments helper -- see split.go. This gate runs IN ADDITION TO the DB `valid` flag
+	// and payout_minimum/redis-bypass checks above; a payment must pass all three before it
+	// enters any tier.
+	splitResult := splitPayments(payments, txnsPerBatch)
+
+	for _, invalidEntry := range splitResult.InvalidAddresses {
+		milieu.Info(fmt.Sprintf("Excluding payment from payout: address %v failed validation (%v), amount %v",
+			invalidEntry.Address, invalidEntry.Err, invalidEntry.Amount))
+		milieu.CaptureException(invalidEntry.Err)
+	}
+
 	if isDryRun {
 		milieu.Info("In dry run mode, not inserting batch or executing wallet, dumping txn list for debugging")
-		for i, v := range payments {
-			milieu.Info(fmt.Sprintf("Index: %v, data: %v", i, v))
+		idx := 0
+		for _, group := range splitResult.Groups {
+			tierLabel := fmt.Sprintf("tier%v individual", group.Tier)
+			if !group.IsIndividual {
+				tierLabel = fmt.Sprintf("tier%v batch %v", group.Tier, group.BatchIndex)
+			}
+			for _, v := range group.Payments {
+				milieu.Info(fmt.Sprintf("Index: %v, tier: %v, data: %v", idx, tierLabel, v))
+				idx++
+			}
+		}
+		if len(splitResult.InvalidAddresses) == 0 {
+			milieu.Info("No invalid addresses found")
+		} else {
+			milieu.Info(fmt.Sprintf("%v invalid address(es) excluded from payout:", len(splitResult.InvalidAddresses)))
+			for i, invalidEntry := range splitResult.InvalidAddresses {
+				milieu.Info(fmt.Sprintf("Invalid Index: %v, address: %v, amount: %v, error: %v",
+					i, invalidEntry.Address, invalidEntry.Amount, invalidEntry.Err))
+			}
 		}
 		return
 	}
 
-	milieu.Info(fmt.Sprintf("%v/%v payments prepared for %v, inserting batch data", len(payments), len(balances), totalAmount))
+	var totalAmount uint64 = 0
+	totalCount := 0
+	for _, group := range splitResult.Groups {
+		for _, v := range group.Payments {
+			totalAmount += balanceCache[v.Address]
+			totalCount++
+		}
+	}
+	if totalCount == 0 {
+		milieu.Info("No payments left after address validation, exiting run")
+		return
+	}
 
-	batchID, err := sql.CreateNewBatch(milieu, len(payments), totalAmount)
+	milieu.Info(fmt.Sprintf("%v/%v payments prepared for %v, inserting batch data", totalCount, len(balances), totalAmount))
+
+	batchID, err := sql.CreateNewBatch(milieu, totalCount, totalAmount)
 	if err != nil {
 		milieu.CaptureException(err)
 		milieu.Info(err.Error())
@@ -192,85 +233,54 @@ func performPayouts(milieu *core.Milieu) {
 	milieu.Info(fmt.Sprintf("Batch ID: %v, starting txn send", batchID))
 
 	sentTransactions := make([]*tari_generated.TransferResult, 0)
-	paymentShortList := make([]*tari_generated.PaymentRecipient, 0)
 	batchCount := 0
 	var successAmount uint64 = 0
 	var failedAmount uint64 = 0
 
-	for _, payment := range payments {
+	for _, group := range splitResult.Groups {
 		blocked = milieu.GetRedis().Exists(context.Background(), haltTxnKey)
 		if blocked.Val() != 0 {
 			// We're blocked by the halt txn key in redis, report and return.
 			milieu.Info("Payout system halted due to redis key set")
-			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
 			break
 		}
-		paymentShortList = append(paymentShortList, payment)
-		if len(paymentShortList) == txnsPerBatch {
-			txResults, err := walletGRPC.SendTransactions(paymentShortList)
-			if err != nil {
-				milieu.CaptureException(err)
-				milieu.Info(err.Error())
-				milieu.Error("Dumping all data in the transaction struct for debugging")
-				for i, v := range paymentShortList {
-					milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
-				}
-				paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
-				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/txnsPerBatch))
-				batchCount += 1
-				continue
-			}
-			localSuccess, localFailure, err := atomicBalanceUpdates(milieu, txResults, addressCache, balanceCache, batchID)
-			if err != nil {
-				milieu.CaptureException(err)
-				milieu.Info(err.Error())
-				milieu.Error("Dumping all data in the transaction struct for debugging")
-				for i, v := range paymentShortList {
-					milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
-				}
-				paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
-				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/txnsPerBatch))
-				batchCount += 1
-				continue
-			}
-			for _, v := range txResults.GetResults() {
-				sentTransactions = append(sentTransactions, v)
-			}
-			successAmount += localSuccess
-			failedAmount += localFailure
-			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
-			milieu.Info(fmt.Sprintf("Processed batch: %v/%v", batchCount, len(payments)/txnsPerBatch))
-			batchCount += 1
-		}
-	}
-
-	if len(paymentShortList) > 0 {
-		txResults, err := walletGRPC.SendTransactions(paymentShortList)
+		txResults, err := walletGRPC.SendTransactions(group.Payments, !group.IsIndividual)
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
 			milieu.Error("Dumping all data in the transaction struct for debugging")
-			for i, v := range paymentShortList {
-				milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+			for i, v := range group.Payments {
+				milieu.Error(fmt.Sprintf("Tier: %v Batch: %v Index: %v, data: %v", group.Tier, group.BatchIndex, i, v))
 			}
-			return
+			milieu.Info(fmt.Sprintf("Processed group WITH ERROR: %v/%v", batchCount+1, len(splitResult.Groups)))
+			batchCount += 1
+			continue
 		}
 		localSuccess, localFailure, err := atomicBalanceUpdates(milieu, txResults, addressCache, balanceCache, batchID)
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
 			milieu.Error("Dumping all data in the transaction struct for debugging")
-			for i, v := range paymentShortList {
-				milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+			for i, v := range group.Payments {
+				milieu.Error(fmt.Sprintf("Tier: %v Batch: %v Index: %v, data: %v", group.Tier, group.BatchIndex, i, v))
 			}
-			return
+			milieu.Info(fmt.Sprintf("Processed group WITH ERROR: %v/%v", batchCount+1, len(splitResult.Groups)))
+			batchCount += 1
+			continue
 		}
 		for _, v := range txResults.GetResults() {
 			sentTransactions = append(sentTransactions, v)
 		}
 		successAmount += localSuccess
 		failedAmount += localFailure
+		groupLabel := "individual"
+		if !group.IsIndividual {
+			groupLabel = fmt.Sprintf("batch %v", group.BatchIndex)
+		}
+		milieu.Info(fmt.Sprintf("Processed group: %v/%v (tier %v %v)", batchCount+1, len(splitResult.Groups), group.Tier, groupLabel))
+		batchCount += 1
 	}
+
 	milieu.Info("Done processing transaction results, updating batch data")
 	err = sql.UpdateBatchAmounts(milieu, batchID, successAmount, failedAmount)
 	if err != nil {
