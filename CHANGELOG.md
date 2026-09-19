@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/Snipa22/go-tari-tools/compare/go-tari-tools-v0.2.1...go-tari-tools-v0.2.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* use inputs.push_image/tag_name directly, not github.event_name, for docker push gate ([f24fca5](https://github.com/Snipa22/go-tari-tools/commit/f24fca525a8781daa275933f85fdaeb5b5637d2c))
+
 ## [0.2.1](https://github.com/Snipa22/go-tari-tools/compare/go-tari-tools-v0.2.0...go-tari-tools-v0.2.1) (2026-09-19)
 
 
