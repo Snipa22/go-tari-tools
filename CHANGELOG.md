@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/Snipa22/go-tari-tools/compare/go-tari-tools-v0.2.0...go-tari-tools-v0.2.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* chain docker-build into release-please run to fix untriggered releases ([dc78b16](https://github.com/Snipa22/go-tari-tools/commit/dc78b16385e611b1bb92833ae816929a2b7f29ef))
+* pass release tag_name through to chained docker build for version tagging ([a4ffd27](https://github.com/Snipa22/go-tari-tools/commit/a4ffd27de987b8fc65cbf8fdc3d5dda16a28f003))
+
 ## [0.2.0](https://github.com/Snipa22/go-tari-tools/compare/go-tari-tools-v0.1.0...go-tari-tools-v0.2.0) (2026-09-19)
 
 
