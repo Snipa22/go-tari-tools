@@ -12,6 +12,10 @@ on:
         description: "Whether to actually push the built image (true when called after a real release)"
         type: boolean
         default: false
+      tag_name:
+        description: "release-please's tag_name output (e.g. go-tari-tools-v0.2.0), used to stamp a version tag on the pushed image when invoked after a real release"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -72,6 +76,7 @@ jobs:
             type=sha
             type=ref,event=tag
             type=raw,value=latest,enable=${{ steps.push-gate.outputs.push == 'true' }}
+            type=raw,value=${{ inputs.tag_name }},enable=${{ github.event_name == 'workflow_call' }}
 
       - name: Build image
         uses: docker/build-push-action@v6
