@@ -44,14 +44,27 @@ jobs:
       # anti-recursion behavior, not a bug) — so the `ref_type == 'tag'`
       # branch below is a fallback for manually-pushed tags only; the real
       # path in practice is the `workflow_call` branch, invoked directly by
-      # release-please.yml in the same run. Dereferencing `inputs.push_image`
-      # on a non-workflow_call trigger evaluates to an empty string per
-      # GitHub's context rules, which is falsy here, so this is safe to
-      # reference unconditionally.
+      # release-please.yml in the same run.
+      #
+      # IMPORTANT GOTCHA (confirmed from a real fired job log, not a guess):
+      # `github.event_name` does NOT become `"workflow_call"` when this
+      # workflow is invoked via `uses: ./.github/workflows/docker-build.yml`.
+      # It stays as whatever the top-level triggering event was for the
+      # *caller* (`release-please.yml` is itself triggered by `on: push`, so
+      # `github.event_name` here resolves to `"push"`, never
+      # `"workflow_call"`). A prior version of this gate checked
+      # `github.event_name == 'workflow_call' && inputs.push_image == 'true'`
+      # and the first half was always false, so the image built successfully
+      # but was silently never pushed. `inputs.push_image` alone is the
+      # correct and sufficient check: it's only ever `"true"` when
+      # release-please.yml's `docker-build-release` job explicitly set it
+      # that way, and on any other trigger where the input doesn't apply it
+      # evaluates to an empty string, which never equals `"true"` here
+      # either — so no `event_name` check is needed alongside it.
       - name: Determine whether to push
         id: push-gate
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_call" && "${{ inputs.push_image }}" == "true" ]]; then
+          if [[ "${{ inputs.push_image }}" == "true" ]]; then
             echo "push=true" >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "push=true" >> "$GITHUB_OUTPUT"
@@ -76,7 +89,7 @@ jobs:
             type=sha
             type=ref,event=tag
             type=raw,value=latest,enable=${{ steps.push-gate.outputs.push == 'true' }}
-            type=raw,value=${{ inputs.tag_name }},enable=${{ github.event_name == 'workflow_call' }}
+            type=raw,value=${{ inputs.tag_name }},enable=${{ inputs.tag_name != '' }}
 
       - name: Build image
         uses: docker/build-push-action@v6
