@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
-	"github.com/Snipa22/go-tari-lib/v2/walletGRPC"
+	"github.com/Snipa22/go-tari-lib/v3/walletGRPC"
 	"log"
+	"time"
 )
 
 func main() {
@@ -13,7 +15,10 @@ func main() {
 	amount := flag.Int("amount", 0, "Amount of uT to send, if you want to send 1XTM, this should be 1000000")
 	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "127.0.0.1:18143", "Tari wallet GRPC address")
 	flag.Parse()
-	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
+	client, err := walletGRPC.New(*walletGRPCAddressPtr)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	if *walletAddress == "" {
 		log.Fatalln("No valid wallet address passed")
 	}
@@ -25,7 +30,9 @@ func main() {
 		FeePerGram:  uint64(5),
 		PaymentType: tari_generated.PaymentRecipient_ONE_SIDED,
 	})
-	resp, err := walletGRPC.SendTransactions(txns, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	resp, err := client.SendTransactions(ctx, txns, false)
 	if err != nil {
 		panic(err)
 	}

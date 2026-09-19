@@ -7,7 +7,7 @@ toolchain go1.24.4
 require (
 	github.com/Snipa22/core-go-lib v1.2.0
 	github.com/Snipa22/go-tari-grpc-lib/v3 v3.2.1-0.20260816155812-abc39e19311d
-	github.com/Snipa22/go-tari-lib/v2 v2.0.0
+	github.com/Snipa22/go-tari-lib/v3 v3.0.1
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/gin-gonic/gin v1.10.1
 	github.com/jackc/pgx/v4 v4.18.3

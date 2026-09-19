@@ -6,12 +6,13 @@ import (
 	"fmt"
 	core "github.com/Snipa22/core-go-lib/milieu"
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
-	"github.com/Snipa22/go-tari-lib/v2/walletGRPC"
+	"github.com/Snipa22/go-tari-lib/v3/walletGRPC"
 	"github.com/Snipa22/go-tari-tools/cmd/payoutDaemon/sql"
 	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 	"math/rand"
 	"os"
+	"time"
 )
 
 /* payoutDaemon does the following steps, on a cron schedule set by a flag, or on the hour by default:
@@ -102,7 +103,7 @@ func atomicBalanceUpdates(milieu *core.Milieu, daemonResponse *tari_generated.Tr
 	return
 }
 
-func performPayouts(milieu *core.Milieu) {
+func performPayouts(milieu *core.Milieu, client *walletGRPC.Client, walletRPCTimeout time.Duration) {
 	if running {
 		return
 	}
@@ -143,6 +144,15 @@ func performPayouts(milieu *core.Milieu) {
 		if !sqlBalance.Valid {
 			// Balance is tagged as invalid, do not process
 			milieu.Debug(fmt.Sprintf("%v is set to invalid", sqlBalance.ID))
+			continue
+		}
+		reconcilePendingVal := milieu.GetRedis().Exists(context.Background(), reconcilePendingKey(sqlBalance.Address))
+		if reconcilePendingVal.Val() != 0 {
+			// This address had an ambiguous-broadcast wallet RPC failure on a previous run and
+			// is not eligible for payout again until a human clears the flag via
+			// -clear-reconcile-flag, after confirming via the wallet's transaction history
+			// whether the money already went out.
+			milieu.Debug(fmt.Sprintf("Balance for %v has a pending reconciliation flag, skipping", sqlBalance.ID))
 			continue
 		}
 		if sqlBalance.Balance < sqlBalance.PayoutMinimum {
@@ -250,7 +260,7 @@ func performPayouts(milieu *core.Milieu) {
 			milieu.Info("Payout system halted due to redis key set")
 			break
 		}
-		txResults, err := walletGRPC.SendTransactions(group.Payments, !group.IsIndividual)
+		txResults, err := sendGroupPayments(milieu, client, milieu.GetRedis(), walletRPCTimeout, group, batchID)
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
@@ -299,7 +309,9 @@ func performPayouts(milieu *core.Milieu) {
 		if !v.IsSuccess {
 			continue
 		}
-		txInfo, err := walletGRPC.GetTransactionInfoByID(v.TransactionId)
+		txInfoCtx, txInfoCancel := context.WithTimeout(context.Background(), walletRPCTimeout)
+		txInfo, err := client.GetTransactionInfoByID(txInfoCtx, v.TransactionId)
+		txInfoCancel()
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
@@ -341,10 +353,18 @@ func main() {
 	settxnHalt := flag.Bool("set-txn-halt", false, "Set transaction halt flag in redis")
 	unsetTxnHalt := flag.Bool("unset-txn-halt", false, "Unset transaction halt flag in redis")
 	balanceSelectOrder := flag.Int("balance-select-order", 0, "Select balance order by, 0 for unsorted, 1 for highest, 2 for lowest")
+	walletRPCTimeoutPtr := flag.Duration("wallet-rpc-timeout", 120*time.Second, "Timeout for each wallet RPC call (SendTransactions/GetTransactionInfoByID)")
+	clearReconcileFlagPtr := flag.String("clear-reconcile-flag", "", "Clear the ambiguous-broadcast reconciliation-pending flag for the given address, then exit")
+	listReconcilePendingPtr := flag.Bool("list-reconcile-pending", false, "List every address currently flagged for ambiguous-broadcast reconciliation, then exit")
 
 	flag.Parse()
 	txnMsg = *txnMsgPtr
-	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
+	client, err := walletGRPC.New(*walletGRPCAddressPtr)
+	if err != nil {
+		milieu.CaptureException(err)
+		milieu.Fatal(err.Error())
+	}
+	walletRPCTimeout := *walletRPCTimeoutPtr
 	balanceSortOrder = *balanceSelectOrder
 
 	txnsPerBatch = *batchSizePtr
@@ -365,11 +385,26 @@ func main() {
 		return
 	}
 
+	if *clearReconcileFlagPtr != "" {
+		key := reconcilePendingKey(*clearReconcileFlagPtr)
+		milieu.Info(fmt.Sprintf("Clearing reconciliation-pending flag for %v (redis key %v) and exiting", *clearReconcileFlagPtr, key))
+		if err = milieu.GetRedis().Del(context.Background(), key).Err(); err != nil {
+			milieu.CaptureException(err)
+			milieu.Fatal(err.Error())
+		}
+		return
+	}
+
+	if *listReconcilePendingPtr {
+		listReconcilePending(milieu)
+		return
+	}
+
 	isDryRun = *dryRunPtr
 
 	// Everything is setup, lets get to work.
 	if *payoutOnBootPtr || *runOncePtr {
-		performPayouts(milieu)
+		performPayouts(milieu, client, walletRPCTimeout)
 		if *runOncePtr {
 			milieu.Info("Dry-run mode is enabled, exiting")
 			os.Exit(0)
@@ -381,7 +416,7 @@ func main() {
 	// Build the cron spinner
 	c := cron.New()
 	_, _ = c.AddFunc(*cronTimePtr, func() {
-		performPayouts(milieu)
+		performPayouts(milieu, client, walletRPCTimeout)
 	})
 	c.Run()
 
