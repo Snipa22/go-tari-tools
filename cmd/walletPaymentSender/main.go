@@ -25,7 +25,7 @@ func main() {
 		FeePerGram:  uint64(5),
 		PaymentType: tari_generated.PaymentRecipient_ONE_SIDED,
 	})
-	resp, err := walletGRPC.SendTransactions(txns)
+	resp, err := walletGRPC.SendTransactions(txns, false)
 	if err != nil {
 		panic(err)
 	}

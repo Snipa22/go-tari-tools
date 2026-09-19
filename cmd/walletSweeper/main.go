@@ -38,7 +38,7 @@ func main() {
 			FeePerGram:  5,
 			PaymentType: 2,
 		},
-	})
+	}, false)
 	if err != nil {
 		log.Fatal(err)
 	}
