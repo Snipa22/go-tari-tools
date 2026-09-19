@@ -13,5 +13,28 @@ name: release-please
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
+
+  # release-please-action authenticates with the default GITHUB_TOKEN (no
+  # PAT configured above), and GitHub Actions deliberately does not allow
+  # the default GITHUB_TOKEN to trigger downstream `on: push` workflow runs
+  # when it pushes a tag or creates a release (anti-recursion protection,
+  # confirmed empirically: go-tari-tools-v0.2.0 was tagged for real and zero
+  # docker-build run fired for it). No tag-glob change to docker-build.yml
+  # can work around that, so instead of waiting for a second, separately
+  # triggered workflow run to react to the tag push, chain the docker
+  # build+push directly into this same run via workflow_call, gated on
+  # release-please-action's own `release_created` output.
+  docker-build-release:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      push_image: true
+    permissions:
+      contents: read
+      packages: write
