@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
-	"github.com/Snipa22/go-tari-lib/address"
+	"github.com/Snipa22/go-tari-lib/v2/address"
 )
 
 // 4-tier payout routing policy thresholds, in microMinotari (1 XTM = 1,000,000 µT).

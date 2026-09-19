@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/Snipa22/go-tari-lib/nodeGRPC"
+	"github.com/Snipa22/go-tari-lib/v2/nodeGRPC"
 	"github.com/coreos/go-systemd/v22/dbus"
 )
 

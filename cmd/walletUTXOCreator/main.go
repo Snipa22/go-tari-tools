@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/Snipa22/go-tari-lib/walletGRPC"
+	"github.com/Snipa22/go-tari-lib/v2/walletGRPC"
 )
 
 func main() {

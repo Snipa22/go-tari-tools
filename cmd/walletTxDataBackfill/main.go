@@ -8,7 +8,7 @@ import (
 	"github.com/Snipa22/core-go-lib/helpers"
 	core "github.com/Snipa22/core-go-lib/milieu"
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
-	"github.com/Snipa22/go-tari-lib/walletGRPC"
+	"github.com/Snipa22/go-tari-lib/v2/walletGRPC"
 	"github.com/Snipa22/go-tari-tools/cmd/payoutDaemon/sql"
 	"github.com/jackc/pgx/v4"
 )
