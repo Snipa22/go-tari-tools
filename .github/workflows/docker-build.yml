@@ -6,6 +6,12 @@ on:
       - main
     tags:
       - "go-tari-tools-v*"
+  workflow_call:
+    inputs:
+      push_image:
+        description: "Whether to actually push the built image (true when called after a real release)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,12 +30,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Only push (and tag `latest`) on version tags. Plain pushes to
-      # main build and validate the image but never publish it.
+      # Only push (and tag `latest`) on version tags, or when invoked via
+      # workflow_call from release-please.yml after a real release. Plain
+      # pushes to main build and validate the image but never publish it.
+      #
+      # Note: `release-please-action`'s own tag/release push is performed
+      # using the default GITHUB_TOKEN, which GitHub Actions deliberately
+      # never allows to trigger downstream `on: push` workflow runs (this is
+      # anti-recursion behavior, not a bug) — so the `ref_type == 'tag'`
+      # branch below is a fallback for manually-pushed tags only; the real
+      # path in practice is the `workflow_call` branch, invoked directly by
+      # release-please.yml in the same run. Dereferencing `inputs.push_image`
+      # on a non-workflow_call trigger evaluates to an empty string per
+      # GitHub's context rules, which is falsy here, so this is safe to
+      # reference unconditionally.
       - name: Determine whether to push
         id: push-gate
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_call" && "${{ inputs.push_image }}" == "true" ]]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
             echo "push=false" >> "$GITHUB_OUTPUT"
