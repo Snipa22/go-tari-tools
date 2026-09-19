@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -35,6 +36,7 @@ jobs:
     uses: ./.github/workflows/docker-build.yml
     with:
       push_image: true
+      tag_name: ${{ needs.release-please.outputs.tag_name }}
     permissions:
       contents: read
       packages: write
