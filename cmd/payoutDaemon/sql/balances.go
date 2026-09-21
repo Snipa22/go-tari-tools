@@ -32,7 +32,7 @@ func GetAllBalances(milieu *core.Milieu, balancesSelectOrder int) ([]BalanceSqlR
 		orderByStr = " order by balance asc"
 		break
 	}
-	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id, date_added, date_balance_increased, date_last_updated, balance, valid, address, payout_minimum from balances"+orderByStr)
+	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id, date_added, date_balance_increased, date_last_updated, balance, valid, address, payout_minimum from balances where balance >= 0"+orderByStr)
 	if err != nil {
 		return nil, err
 	}
