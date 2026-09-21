@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/Snipa22/go-tari-tools/compare/go-tari-tools-v0.2.2...go-tari-tools-v0.3.0) (2026-09-21)
+
+
+### Features
+
+* migrate payoutDaemon off deprecated walletGRPC API, add ambiguous-broadcast reconciliation gate ([13d46e0](https://github.com/Snipa22/go-tari-tools/commit/13d46e03973f196a316d980ff173fef5962c5c12))
+
+
+### Bug Fixes
+
+* **payoutDaemon:** exclude negative-balance rows in GetAllBalances ([e21ac29](https://github.com/Snipa22/go-tari-tools/commit/e21ac29b81a34a6eb8a41a459a590e655712578b))
+
 ## [0.2.2](https://github.com/Snipa22/go-tari-tools/compare/go-tari-tools-v0.2.1...go-tari-tools-v0.2.2) (2026-09-19)
 
 
