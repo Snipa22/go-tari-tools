@@ -151,3 +151,70 @@ func listReconcilePending(milieu *core.Milieu) {
 	}
 	milieu.Info(fmt.Sprintf("%v address(es) currently flagged for reconciliation", found))
 }
+
+// redisScanDeleter is the narrow Redis surface clearAllReconcilePending depends on -- Scan (for
+// cursor-based keyspace iteration, same as listReconcilePending) plus Del (to remove each
+// matched key) -- so it can be unit tested with an in-memory fake instead of a real Redis
+// server. Satisfied directly by *redis.Client.
+type redisScanDeleter interface {
+	Scan(ctx context.Context, cursor uint64, match string, count int64) *redis.ScanCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
+}
+
+var _ redisScanDeleter = (*redis.Client)(nil)
+
+// clearAllReconcilePending scans Redis for every key matching reconcilePendingKeyPattern and
+// deletes each one, logging the address cleared plus a final summary count. This is the bulk
+// counterpart to the single-address `-clear-reconcile-flag`: where that flag clears exactly one
+// address an operator has already confirmed via the wallet's transaction history, this clears
+// every currently-flagged address in one pass -- intended for situations where an operator has
+// independently verified (e.g. after a wallet outage is resolved and transaction history has
+// been fully reconciled) that none of the outstanding flags represent real double-pay risk.
+//
+// Uses SCAN (not KEYS), same as listReconcilePending, since this may run against a production
+// Redis instance shared with other traffic and a blocking KEYS * call would stall it.
+func clearAllReconcilePending(milieu *core.Milieu) {
+	clearAllReconcilePendingWithClient(milieu, milieu.GetRedis())
+}
+
+// clearAllReconcilePendingWithClient does the real work behind clearAllReconcilePending, taking
+// the narrow redisScanDeleter interface so it can be exercised in tests against an in-memory
+// fake rather than a real Redis server.
+func clearAllReconcilePendingWithClient(milieu *core.Milieu, redisClient redisScanDeleter) {
+	ctx := context.Background()
+
+	milieu.Info("Clearing every address currently flagged for ambiguous-broadcast reconciliation:")
+	var cursor uint64
+	cleared := 0
+	for {
+		keys, nextCursor, err := redisClient.Scan(ctx, cursor, reconcilePendingKeyPattern, 100).Result()
+		if err != nil {
+			// A SCAN failure means we can't trust that we've seen the full keyspace on this
+			// page -- unlike a per-key Del failure below, retrying/continuing past this would
+			// risk silently skipping keys with no way to know it. Log it and stop the whole run
+			// so an operator notices and can re-run once Redis is healthy again, rather than
+			// reporting a false "all clear".
+			milieu.CaptureException(err)
+			milieu.Error(fmt.Sprintf("clearAllReconcilePending: SCAN failed, aborting with %v address(es) cleared so far: %v", cleared, err))
+			return
+		}
+		for _, key := range keys {
+			address := strings.TrimPrefix(key, reconcilePendingKeyPrefix)
+			if err := redisClient.Del(ctx, key).Err(); err != nil {
+				// A single key's Del failing doesn't tell us anything about the rest of the
+				// keyspace, so it's safe (and more useful to the operator) to log it and keep
+				// going rather than abort the whole run.
+				milieu.CaptureException(err)
+				milieu.Error(fmt.Sprintf("Failed to clear reconciliation-pending flag for %v (redis key %v): %v", address, key, err))
+				continue
+			}
+			milieu.Info(fmt.Sprintf("Clearing reconciliation-pending flag for %v (redis key %v)", address, key))
+			cleared++
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	milieu.Info(fmt.Sprintf("%v address(es) cleared for reconciliation", cleared))
+}
