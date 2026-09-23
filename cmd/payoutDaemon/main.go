@@ -356,6 +356,7 @@ func main() {
 	walletRPCTimeoutPtr := flag.Duration("wallet-rpc-timeout", 120*time.Second, "Timeout for each wallet RPC call (SendTransactions/GetTransactionInfoByID)")
 	clearReconcileFlagPtr := flag.String("clear-reconcile-flag", "", "Clear the ambiguous-broadcast reconciliation-pending flag for the given address, then exit")
 	listReconcilePendingPtr := flag.Bool("list-reconcile-pending", false, "List every address currently flagged for ambiguous-broadcast reconciliation, then exit")
+	clearAllReconcilePendingPtr := flag.Bool("clear-all-reconcile-pending", false, "Clear the ambiguous-broadcast reconciliation-pending flag for every currently flagged address, then exit")
 
 	flag.Parse()
 	txnMsg = *txnMsgPtr
@@ -397,6 +398,11 @@ func main() {
 
 	if *listReconcilePendingPtr {
 		listReconcilePending(milieu)
+		return
+	}
+
+	if *clearAllReconcilePendingPtr {
+		clearAllReconcilePending(milieu)
 		return
 	}
 
